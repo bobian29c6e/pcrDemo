@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+.env/
+
+# Project-specific local venv (Qt Creator)
+demo1/.qtcreator/Python_3_9_6venv/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Build/Dist
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# PyInstaller
+*.spec
