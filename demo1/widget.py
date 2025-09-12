@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QPushButton,
     QToolButton,
+    QLineEdit,
+    QFileDialog,
     QButtonGroup,
     QFrame,
     QScrollArea,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import QSplitter, QSizePolicy, QGraphicsDropShadowEffect
 from PySide6.QtWidgets import QWidget as _QW
 import numpy as np
 import cv2
+import os
 
 # Important:
 # You need to run the following command to generate the ui_form.py file
@@ -428,6 +431,18 @@ class Widget(QWidget):
         tab_misc = QWidget(self)
         tab4_layout = QVBoxLayout(tab_misc)
 
+        # Camera mode row (fluorescence / mono)
+        self.camera_mode_fluorescence = True
+        self.cam_mode_btn = QPushButton("荧光", self)
+        self.cam_mode_btn.setCheckable(True)
+        self.cam_mode_btn.setChecked(True)
+        self.cam_mode_btn.toggled.connect(self._on_cam_mode_toggled)
+        m0 = QHBoxLayout()
+        m0.addWidget(QLabel("摄像头模式:"))
+        m0.addStretch(1)
+        m0.addWidget(self.cam_mode_btn)
+        tab4_layout.addLayout(m0)
+
         # Exposure controls row
         m1 = QHBoxLayout()
         m1.addWidget(QLabel("Exposure Auto:"))
@@ -453,6 +468,19 @@ class Widget(QWidget):
         m3.addWidget(self.enhance_chk)
         m3.addStretch(1)
         tab4_layout.addLayout(m3)
+
+        # Image save path chooser
+        self.image_save_dir = os.path.expanduser("~/Pictures")
+        self.save_path_edit = QLineEdit(self)
+        self.save_path_edit.setReadOnly(True)
+        self.save_path_edit.setText(self.image_save_dir)
+        self.save_path_btn = QPushButton("选择路径…", self)
+        self.save_path_btn.clicked.connect(self._choose_save_dir)
+        m_path = QHBoxLayout()
+        m_path.addWidget(QLabel("图片保存路径:"))
+        m_path.addWidget(self.save_path_edit, 1)
+        m_path.addWidget(self.save_path_btn)
+        tab4_layout.addLayout(m_path)
 
         # Place Start/Stop at bottom
         tab4_layout.addSpacing(self.s(8))
@@ -663,6 +691,21 @@ class Widget(QWidget):
 
     def _on_enhance_toggled(self, checked: bool):
         self.enhance_contrast = checked
+
+    # --- Misc tab handlers ---
+    def _on_cam_mode_toggled(self, on: bool):
+        # True -> 荧光, False -> 黑白
+        self.camera_mode_fluorescence = on
+        self.cam_mode_btn.setText("荧光" if on else "黑白")
+        # If future: notify worker about color mode
+        # if self.worker:
+        #     self.worker.setColorMode.emit("fluorescence" if on else "mono")
+
+    def _choose_save_dir(self):
+        d = QFileDialog.getExistingDirectory(self, "选择图片保存路径", self.image_save_dir)
+        if d:
+            self.image_save_dir = d
+            self.save_path_edit.setText(d)
 
 
 if __name__ == "__main__":
