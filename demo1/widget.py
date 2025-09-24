@@ -26,6 +26,7 @@ from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QIcon
 from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal
 from PySide6.QtWidgets import QSplitter, QSizePolicy, QGraphicsDropShadowEffect
 from PySide6.QtWidgets import QWidget as _QW
+from PySide6.QtSerialPort import QSerialPort, QSerialPortInfo
 import numpy as np
 import cv2
 import os
@@ -408,6 +409,10 @@ class Widget(QWidget):
         self.channel_group = video_refs.get("channel_group")
         self.channel_buttons = video_refs.get("channel_buttons", [])
 
+        # Wire channel buttons to send serial messages
+        for i, btn in enumerate(self.channel_buttons):
+            btn.clicked.connect(lambda _checked=False, i=i: self._on_channel_button_clicked(i))
+
         # Tab 1 UI content is provided by build_video_tab(); subsections removed from here
 
         # Put content inside a scroll area to avoid stretching when window is short
@@ -430,21 +435,71 @@ class Widget(QWidget):
         # Tab 4: 其他设置 (move all controls here)
         tab_misc = QWidget(self)
         tab4_layout = QVBoxLayout(tab_misc)
+        # loosen overall margins/spacing for a better look
+        tab4_layout.setContentsMargins(self.s(10), self.s(6), self.s(10), self.s(8))
+        tab4_layout.setSpacing(self.s(8))
+        tab4_layout.setAlignment(Qt.AlignTop)
 
-        # Camera mode row (fluorescence / mono)
+        # Device & Serial card (clean grouping)
+        device_card, device_layout = self._make_card("设备与串口", "🔌")
+        device_layout.setContentsMargins(self.s(12), self.s(8), self.s(12), self.s(12))
+        device_layout.setSpacing(self.s(10))
+
+        # Row A: Camera mode
         self.camera_mode_fluorescence = True
         self.cam_mode_btn = QPushButton("荧光", self)
         self.cam_mode_btn.setCheckable(True)
         self.cam_mode_btn.setChecked(True)
         self.cam_mode_btn.toggled.connect(self._on_cam_mode_toggled)
-        m0 = QHBoxLayout()
-        m0.addWidget(QLabel("摄像头模式:"))
-        m0.addStretch(1)
-        m0.addWidget(self.cam_mode_btn)
-        tab4_layout.addLayout(m0)
+        row_cam = QHBoxLayout()
+        row_cam.setContentsMargins(0, 0, 0, 0)
+        row_cam.setSpacing(self.s(10))
+        row_cam.addWidget(QLabel("摄像头模式:"))
+        row_cam.addWidget(self.cam_mode_btn)
+        row_cam.addStretch(1)
+        device_layout.addLayout(row_cam)
+
+        # Row B: Serial controls
+        self.serial = QSerialPort(self)
+        self.serial.setBaudRate(115200)
+        self.serial.setDataBits(QSerialPort.Data8)
+        self.serial.setParity(QSerialPort.NoParity)
+        self.serial.setStopBits(QSerialPort.OneStop)
+        self.serial.setFlowControl(QSerialPort.NoFlowControl)
+        self.serial.errorOccurred.connect(lambda _e: None)
+        self._serial_signals_wired = False
+        self.port_cb = QComboBox(self)
+        self.port_refresh_btn = QPushButton("刷新", self)
+        self.port_toggle_btn = QPushButton("连接", self)
+        self.port_toggle_btn.setCheckable(True)
+        self.port_status_lbl = QLabel("未连接", self)
+        self.port_status_lbl.setStyleSheet("color:#9aa1a9;")
+        self.port_refresh_btn.clicked.connect(self._refresh_serial_ports)
+        self.port_toggle_btn.toggled.connect(self._on_serial_toggle)
+        row_serial = QHBoxLayout()
+        row_serial.setContentsMargins(0, 0, 0, 0)
+        row_serial.setSpacing(self.s(10))
+        row_serial.addWidget(QLabel("串口:"))
+        row_serial.addWidget(self.port_cb, 1)
+        row_serial.addWidget(self.port_refresh_btn)
+        row_serial.addWidget(self.port_toggle_btn)
+        row_serial.addWidget(self.port_status_lbl)
+        device_layout.addLayout(row_serial)
+
+        # Slightly relaxed control heights for better look
+        nice_h = self.s(34)
+        for w in (self.cam_mode_btn, self.port_cb, self.port_refresh_btn, self.port_toggle_btn):
+            w.setMinimumHeight(nice_h)
+            w.setMaximumHeight(nice_h)
+
+        tab4_layout.addWidget(device_card)
+        tab4_layout.addSpacing(self.s(10))
+        self._refresh_serial_ports()
 
         # Exposure controls row
         m1 = QHBoxLayout()
+        m1.setContentsMargins(0, 0, 0, 0)
+        m1.setSpacing(self.s(6))
         m1.addWidget(QLabel("Exposure Auto:"))
         m1.addWidget(self.exposure_auto_cb)
         m1.addWidget(QLabel("Exposure:"))
@@ -454,6 +509,8 @@ class Widget(QWidget):
 
         # Gain controls row
         m2 = QHBoxLayout()
+        m2.setContentsMargins(0, 0, 0, 0)
+        m2.setSpacing(self.s(6))
         m2.addWidget(QLabel("Gain Auto:"))
         m2.addWidget(self.gain_auto_cb)
         m2.addWidget(QLabel("Gain:"))
@@ -463,6 +520,8 @@ class Widget(QWidget):
 
         # Options row (gamma/enhance)
         m3 = QHBoxLayout()
+        m3.setContentsMargins(0, 0, 0, 0)
+        m3.setSpacing(self.s(6))
         m3.addWidget(self.gamma_chk)
         m3.addSpacing(12)
         m3.addWidget(self.enhance_chk)
@@ -477,14 +536,18 @@ class Widget(QWidget):
         self.save_path_btn = QPushButton("选择路径…", self)
         self.save_path_btn.clicked.connect(self._choose_save_dir)
         m_path = QHBoxLayout()
+        m_path.setContentsMargins(0, 0, 0, 0)
+        m_path.setSpacing(self.s(4))
         m_path.addWidget(QLabel("图片保存路径:"))
         m_path.addWidget(self.save_path_edit, 1)
         m_path.addWidget(self.save_path_btn)
         tab4_layout.addLayout(m_path)
 
-        # Place Start/Stop at bottom
-        tab4_layout.addSpacing(self.s(8))
-        tab4_layout.addWidget(self.ui.pushButton)
+        # Place Start/Stop close to previous row
+        tab4_layout.addSpacing(self.s(6))
+        tab4_layout.addWidget(self.ui.pushButton, 0, Qt.AlignLeft)
+        # bottom stretch pins content to the top (removes excess empty area above rows)
+        tab4_layout.addStretch(1)
         self.tabs.addTab(tab_misc, "其他设置")
 
         # Configure button
@@ -706,6 +769,121 @@ class Widget(QWidget):
         if d:
             self.image_save_dir = d
             self.save_path_edit.setText(d)
+
+    # --- Serial helpers ---
+    def _refresh_serial_ports(self):
+        cur = self.port_cb.currentData() if hasattr(self, 'port_cb') else None
+        self.port_cb.blockSignals(True)
+        try:
+            self.port_cb.clear()
+            for info in QSerialPortInfo.availablePorts():
+                name = info.portName()
+                sysloc = info.systemLocation() or name
+                desc = info.description() or ""
+                label = f"{name}  {desc}" if desc else name
+                # store both info object and props for robust opening
+                self.port_cb.addItem(label, {"name": name, "sysloc": sysloc, "info": info})
+            # try restore selection
+            if cur is not None:
+                # find by sysloc
+                idx = -1
+                for i in range(self.port_cb.count()):
+                    d = self.port_cb.itemData(i)
+                    if isinstance(d, dict) and d.get("sysloc") == cur:
+                        idx = i
+                        break
+                if idx >= 0:
+                    self.port_cb.setCurrentIndex(idx)
+        finally:
+            self.port_cb.blockSignals(False)
+
+    def _on_serial_toggle(self, on: bool):
+        if on:
+            # open
+            data = self.port_cb.currentData()
+            if not data:
+                self.port_toggle_btn.blockSignals(True)
+                self.port_toggle_btn.setChecked(False)
+                self.port_toggle_btn.blockSignals(False)
+                self.port_status_lbl.setText("未选择端口")
+                return
+            if self.serial.isOpen():
+                self.serial.close()
+            # Prefer using QSerialPortInfo when available
+            info = data.get("info") if isinstance(data, dict) else None
+            if info is not None:
+                try:
+                    self.serial.setPort(info)
+                except Exception:
+                    pass
+            # Fallback path
+            sysloc = data.get("sysloc") if isinstance(data, dict) else str(data)
+            name = data.get("name") if isinstance(data, dict) else None
+            target = sysloc or name or ""
+            if not self.serial.isOpen():
+                try:
+                    self.serial.setPortName(target)
+                except Exception:
+                    pass
+            ok = self.serial.open(QSerialPort.ReadWrite)
+            if not ok:
+                self.port_toggle_btn.blockSignals(True)
+                self.port_toggle_btn.setChecked(False)
+                self.port_toggle_btn.blockSignals(False)
+                self.port_toggle_btn.setText("连接")
+                self.port_status_lbl.setText(f"连接失败: {self.serial.errorString()}")
+            else:
+                self.port_toggle_btn.setText("断开")
+                self.port_status_lbl.setText(f"已连接: {name or target}")
+                # Optional: basic readyRead to show data length (silent)
+                # wire signals once
+                if not self._serial_signals_wired:
+                    self.serial.readyRead.connect(self._on_serial_ready_read)
+                    self.serial.bytesWritten.connect(lambda n: self.port_status_lbl.setText(f"已发送 {n}B"))
+                    self._serial_signals_wired = True
+                # Some devices need DTR/RTS asserted
+                try:
+                    self.serial.setDataTerminalReady(True)
+                    self.serial.setRequestToSend(True)
+                except Exception:
+                    pass
+        else:
+            if self.serial.isOpen():
+                self.serial.close()
+            self.port_toggle_btn.setText("连接")
+            self.port_status_lbl.setText("未连接")
+
+    def _send_serial(self, data: bytes):
+        if self.serial and self.serial.isOpen():
+            try:
+                print(f"[SERIAL TX] {data!r}")
+                n = self.serial.write(data)
+                # ensure it is flushed to OS driver
+                self.serial.waitForBytesWritten(100)
+                # update status label briefly
+                disp = data if len(data) < 24 else (data[:21] + b"...")
+                self.port_status_lbl.setText(f"已发送 {n}B: {disp!r}")
+            except Exception:
+                self.port_status_lbl.setText("发送失败")
+        else:
+            self.port_status_lbl.setText("未连接，无法发送")
+
+    def _on_serial_ready_read(self):
+        try:
+            data = bytes(self.serial.readAll())
+            # optional: print to console for now
+            if data:
+                print(f"[SERIAL RX] {data!r}")
+        except Exception:
+            pass
+
+    def _on_channel_button_clicked(self, idx: int):
+        # 构造一个简单串口消息，例如: CHAN:<index>\r\n（多数设备使用 CRLF 结尾）
+        try:
+            msg = f"CHAN:{idx}\r\n".encode("utf-8")
+        except Exception:
+            msg = b"CHAN:0\r\n"
+        self._send_serial(msg)
 
 
 if __name__ == "__main__":
